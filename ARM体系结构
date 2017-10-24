@@ -1,140 +1,140 @@
 =====================================
-һ��CPU�Ĺ���ģʽ�����ļĴ���
+一、CPU的工作模式和他的寄存器
 =====================================
 
-1������ģʽ:ָ����CPU�Ĺ���ģʽ
-  Ϊ��Ӧ�Բ�ͬ�������Լ��Դ...�ֳ�9�ֹ���ģʽ��
-1.1������ģʽ���л�
-  ��CPUͻ���쳣ʱ���ڼ�������ݱ������ģ�
-  ���ں���funcA()�е���funcB()ʱ��funcA�����ݱ������ģ�
-  �ڽ���ģʽ�л����߶༶����...����£������ݱ�����CPU��ļĴ���������ʵģ��ٶȿ����ȶ���
-  ���Խ������ǼĴ�����
-2��CPU�Ĵ���
-  ����ͨ�õģ�
-    R0~R12 ͨ�üĴ�������ͬ�����ݵ�
-    ����ģʽ��R0~R12��USRģʽ�ǹ�����(����FIQ , R8~R12)����PC,CPSRҲ�ǹ����ġ�
-    USERģʽû��SPSR
-  ��������ģ�
-  R13(sp):  stack point ջָ��Ĵ���
-   ���ã�ALU��ȥsp�Ĵ���ȡ����Ҫִ�еĳ�����ڴ��ַ��
-  R14(lr):  Link register ���ӼĴ���
-   ���ã��洢�ӳ��򷵻ص�ַ��
-   ������ת֮ǰ�������һ��ָ��ĵ�ַ���浽R14
-  R15(pc):  program count ���������
-    ��Զָ��ȡַ��ָ���ַ
-    (����һ���� PC=0 �ӵ�һ��ָ�ʼִ�С��ڶ���ʱ�����ڣ�PC=4(����ֵ���߼���Ԫ�Լ��ı�)...)
+1、工作模式:指的是CPU的工作模式
+  为了应对不同情况，节约资源...分出9种工作模式。
+1.1、工作模式的切换
+  ①CPU突发异常时正在计算的数据保存在哪？
+  ②在函数funcA()中调用funcB()时，funcA的数据保存在哪？
+  在进行模式切换或者多级调用...情况下，将数据保存在CPU里的寄存器是最合适的，速度快又稳定。
+  所以接下来是寄存器。
+2、CPU寄存器
+  几个通用的：
+    R0~R12 通用寄存器，放同意数据的
+    各个模式的R0~R12与USR模式是共享的(除了FIQ , R8~R12)还有PC,CPSR也是共享的。
+    USER模式没有SPSR
+  几个特殊的：
+  R13(sp):  stack point 栈指针寄存器
+   作用：ALU会去sp寄存器取出将要执行的程序的内存地址。
+  R14(lr):  Link register 连接寄存器
+   作用：存储子程序返回地址。
+   函数跳转之前，会把下一条指令的地址保存到R14
+  R15(pc):  program count 程序计数器
+    永远指向取址的指令地址
+    (例：一开机 PC=0 从第一个指令开始执行。第二个时钟周期，PC=4(它的值由逻辑单元自己改变)...)
     MOV PC LR (return)
-  CPSR   :  current program status register ��ǰ����״̬�Ĵ���
-   ���ã�����ǰ����״̬���б���
-  SPSR   :  save program status register ����״̬����Ĵ���
-   ���ã�״̬�л�ʱ������ǰһ��״̬��(userģʽ��û������Ĵ�����ԭ��)
-��Thunbָ��£�ֻ����R0~R7
-CPSRָ���ʽ���͵���
-  Mode[4:0] ��ǰģʽ����
-  T 5       �Ƿ���Thunbָ�
-  F 6       �Ƿ����FIQ
-  I 7       �Ƿ����IRQ
-  A 8       �Ƿ�����첽abort
-  E 9       ��С��ģʽ
-  IT[15:10] Thunb-2ָ���if...then ����ִ��
-  GE[19:16] SIMDָ��ʹ��
-  J 24      �Ƿ�����java����
-  N Z C V Q [31:27] �߼���ϵ���
+  CPSR   :  current program status register 当前程序状态寄存器
+   作用：将当前程序状态进行保存
+  SPSR   :  save program status register 程序状态保存寄存器
+   作用：状态切换时，保存前一个状态。(user模式下没有这个寄存器的原因)
+在Thunb指令集下，只能用R0~R7
+CPSR指令格式：低到高
+  Mode[4:0] 当前模式编码
+  T 5       是否是Thunb指令集
+  F 6       是否禁用FIQ
+  I 7       是否禁用IRQ
+  A 8       是否禁用异步abort
+  E 9       大小端模式
+  IT[15:10] Thunb-2指令的if...then 条件执行
+  GE[19:16] SIMD指令使用
+  J 24      是否启动java加速
+  N Z C V Q [31:27] 逻辑关系相关
 ===============================================
-����ARM���
+二、ARM汇编
 ===============================================
-1��ָ���ʽ
-      ����ָ�� ������ ״̬ Ŀ�� Դ ������
-2������ָ�
-  (1)��ת��� B,BL
-    �������̵���ת���� ARM �����������ַ�������ʵ�ֳ������̵���תָ������ʵ��
-  BLָ��(Branch with Link)��ʾ������ֵ����ת.
-  BL��B����һ��,����תǰ,BL��ѵ�ǰλ�ñ�����R14(��LR�Ĵ���),����ת���������,��MOV PC,LRָ��
-  ������,��ʵ���Ͼ���C����ִ�к������÷�,�������ӳ�����BL,ִ�����Ӻ�����,������MOV PC,LR������.
-  ��MOV PC,XXX����4G�ռ���ת��ͬ,B���ֻ��32M�ռ���ת,(��Ϊƫ������һ���з���26bit����ֵ=32M)
+1、指令格式
+      操作指令 条件码 状态 目标 源 操作数
+2、常用指令：
+  (1)跳转语句 B,BL
+    程序流程的跳转，在 ARM 程序中有两种方法可以实现程序流程的跳转指令用于实现
+  BL指令(Branch with Link)表示带返回值的跳转.
+  BL比B多做一步,在跳转前,BL会把当前位置保存在R14(即LR寄存器),当跳转代码结束后,用MOV PC,LR指令
+  跳回来,这实际上就是C语言执行函数的用法,汇编里调子程序都用BL,执行完子函数后,可以用MOV PC,LR跳回来.
+  与MOV PC,XXX能在4G空间跳转不同,B语句只能32M空间跳转,(因为偏移量是一个有符号26bit的数值=32M)
 
-   (2)��������ָ��(�ڼĴ���֮��) MOV,MVN
-   MOV(MOVE)ָ�����ɴ���һ���Ĵ���������λ�ļĴ�����һ�����������ص�Ŀ�ļĴ���
-   MOV R0,R1 ; ��R1��ֵ����R0
-   MVN( MOVE Negative)ȡ�����ٴ�ֵ,��MOV����һ��ȡ��
-   MVN R0, #0 ;��0ȡ��(��-1)����R0
+   (2)传输数据指令(在寄存器之间) MOV,MVN
+   MOV(MOVE)指令可完成从另一个寄存器、被移位的寄存器或将一个立即数加载到目的寄存器
+   MOV R0,R1 ; 把R1的值传到R0
+   MVN( MOVE Negative)取反后再传值,比MOV多了一步取反
+   MVN R0, #0 ;把0取反(即-1)传给R0
 
-  (3)����/�洢ָ��(���ڴ���Ĵ���֮��) LDR,STR
-  LDR,STR�����ڼĴ������ⲿ�洢����������ָ��,ע����MOV������,����ֻ�ڼĴ�����������.
-  LDR R0,[R1]; R1��ֵ���ɵ�ַ,�ٴ������ַװ�����ݵ�R0 (R0=*R1)
-  LDR R1,=0x30008000 ; �ѵ�ַ0x30008000��ֵװ�뵽R1��,LDR���ó���Ҫ��=��ͷ(MOV����#)
-  �ȼ���-->LDR R1,[R0,#0x30008000] ;
-    �ص㣺��little word С��ģʽ
-         �ڰ��ֳ���ȡ һ���ֳ���4���ֽڡ�
-          ���Լ�B����ֽ�Ϊ��λ:LDRB R0,[R1,#0x01] ������ֻ��ȡһ���ֽ�
+  (3)加载/存储指令(在内存与寄存器之间) LDR,STR
+  LDR,STR是用于寄存器和外部存储器交换数据指令,注意与MOV的区别,后者只在寄存器或常数交换.
+  LDR R0,[R1]; R1的值当成地址,再从这个地址装入数据到R0 (R0=*R1)
+  LDR R1,=0x30008000 ; 把地址0x30008000的值装入到R1中,LDR中用常数要用=打头(MOV中用#)
+  等价于-->LDR R1,[R0,#0x30008000] ;
+    特点：①little word 小端模式
+         ②按字长读取 一个字长是4个字节。
+          可以加B变成字节为单位:LDRB R0,[R1,#0x01] 这样就只读取一个字节
 
-  STR(Store) ���ڰ�һ���Ĵ�����ֵ�����ⲿ�洢�ռ�,��LDR�������.
-  STR R0,[R1] ; ��R0��ֵ,���뵽R1��Ӧ��ַ�ռ���(*R1 = R0)
-  STR R0,=0x30008000 ;��R0��ֵ���뵽��ַ0x30008000
+  STR(Store) 用于把一个寄存器的值存入外部存储空间,是LDR的逆操作.
+  STR R0,[R1] ; 把R0的值,存入到R1对应地址空间上(*R1 = R0)
+  STR R0,=0x30008000 ;把R0中值存入到地址0x30008000
 
-  (4) ��������ָ��ADD,SUB,ADC,SBC,MUL
-  ADD�ӷ�ָ��
+  (4) 算术运算指令ADD,SUB,ADC,SBC,MUL
+  ADD加法指令
     ADD R0,R1,R2; R0=R1+R2
-  ADC����λ�ӷ�ָ��,�����˼�����������,��Ҫ��CPSR��CֵҲҪ������
-    ADDS R0,R1,R2; R0=R1+R2,ADDS��S��ʾ�ѽ�λ���д��CPSR
+  ADC带进位加法指令,即除了加两个数以外,还要把CPSR的C值也要带进来
+    ADDS R0,R1,R2; R0=R1+R2,ADDS中S表示把进位结果写入CPSR
     ADC R5,R3,R4 ;R5=R3+R4+C
 
-  SUB����ָ��
+  SUB减法指令
     SUB R0,R1,R2; R0=R1-R2
-  SBC����λ����ָ��,�����˼�����������,��Ҫ��CPSR��CֵҲҪ������
-    SUBS R0,R1,R2; R0=R1-R2,SUBS��S��ʾ�ѽ�λ���д��CPSR
+  SBC带进位减法指令,即除了加两个数以外,还要把CPSR的C值也要带进来
+    SUBS R0,R1,R2; R0=R1-R2,SUBS中S表示把进位结果写入CPSR
     SBC R5,R3,R4 ;R5=R3-R4-C
 
-  MUL �˷�ָ��
+  MUL 乘法指令
    MUL R0,R1,R2; R0=R1*R2
 
-  (5)λ����ָ�� AND,ORR,TST,BIC
-  ANDλ��ָ��
+  (5)位操作指令 AND,ORR,TST,BIC
+  AND位与指令
     AND R0,R1,R2; R0=R1 & R2
-  ORRλ��ָ��
+  ORR位或指令
     ORR R0,R1,R2; R0=R1 | R2
-  TST����ĳһλ�Ƿ�Ϊ1,���ѽ��д��CPSR,����һ��ʹ��
-    TST R1,#0xffe;   ��ͬ��if(R1 & 0xffe)
-  BIC��λ����
-    BIC   R0��R0����0xF;  ��ͬ�� R0 &=~(0xF)
-  (6)�Ƚ�ָ��  CMP
-  CMP�Ƚ�����������,���ѽ������CPSR����һ�����ʹ��
-    CMP R0,R1; �Ƚ�R0,R1
-  (7)��Ĵ�����䴫��ָ�� LDM/STM
-    ������һ�δ�һ��BUFFER���Ĵ������У��򷴹���.����һ��Ҫ��һ����ַ�ı䷽��
+  TST测试某一位是否为1,并把结果写入CPSR,供下一句使用
+    TST R1,#0xffe;   等同于if(R1 & 0xffe)
+  BIC清位操作
+    BIC   R0，R0，＃0xF;  等同于 R0 &=~(0xF)
+  (6)比较指令  CMP
+  CMP比较两个操作数,并把结果存入CPSR供下一句语句使用
+    CMP R0,R1; 比较R0,R1
+  (7)多寄存器语句传输指令 LDM/STM
+    类似于一次传一个BUFFER到寄存器当中，或反过来.后面一般要接一个地址改变方法
 
-3������������
-  �Ϸ����������� num/4 �����0~255֮����ǺϷ���
+3、关于立即数
+  合法的立即数： num/4 结果在0~255之间就是合法的
 
-4��Ѱַ��ʽ
-  �ڴ� DDR �Ĵ���...
-  ���  Ӳ��...
-  7��Ѱַ��ʽ
-  (1)������Ѱַ
+4、寻址方式
+  内存 DDR 寄存器...
+  外存  硬盘...
+  7种寻址方式
+  (1)立即数寻址
     ADD R0,R0,#0x01
-  (2)�Ĵ���Ѱַ
+  (2)寄存器寻址
     ADD R0,R1,R2
-  (3)�Ĵ������Ѱַ
+  (3)寄存器间接寻址
     LDR R0,[R1]
     STR R),[R1]
-  (4)�Ĵ�����λѰַ
+  (4)寄存器移位寻址
     ADD R0,R2,R1,LSL #2
-  (5)��ַ��ַѰַ
+  (5)基址地址寻址
     LDR R0,[R1,#4]
     LDR R0,[R1],#4
     LDR R0,[R1,R2]
-  (6)��Ĵ���Ѱַ
+  (6)多寄存器寻址
     LDMIA R0,{R!,R2,R3,R4}
-  (7)���Ѱַ
+  (7)相对寻址
     BL NEXT
     MOV PC LR
-5����ϱ��
-	(1)��C������Ƕ����
-		���ӣ�
+5、混合编程
+	(1)在C语言中嵌入汇编
+		例子：
 			void my_strcpy(char *src, char *dest)
 			{
 				char ch;
-				__asm{	//���ﲻͬ�����������ǲ�һ����
+				__asm{	//这里不同编译器可能是不一样的
 					loop:
 						LDRB ch,[src],#1
 						STRB ch,[dest],#1
@@ -142,19 +142,19 @@ CPSRָ���ʽ���͵���
 						BNE loop
 				}
 			}
-		���ƣ�
-			�ٲ���ֱ����PC�Ĵ�����ֵ��������תҪ��B��BLָ��
-			��R12��R13���ܱ���������������м������
+		限制：
+			①不能直接向PC寄存器赋值，程序跳转要用B或BL指令
+			②R12和R13可能被编译器用来存放中间编译结果
 
-  (2)��C�����е��û��
-		���裺
-			(1)����Ӧ��lable����export
-			(2)��c�����ж���extern function
-			(3)C����ʹ��
-		**���ڲ������ݣ�
-			c���Ժͻ��֮��Ĳ�������ͨ����Ӧ��˳����R0~R3���д��ݡ�
-			����4���Ļ�����ջ��ɡ�Ȼ�󷵻�ֵͨ��R0���ݡ�(ATPCS�淶)
+  (2)在C语言中调用汇编
+		步骤：
+			(1)在相应的lable定义export
+			(2)在c语言中定义extern function
+			(3)C语言使用
+		**关于参数传递：
+			c语言和汇编之间的参数传递通过对应的顺序，用R0~R3进行传递。
+			多余4个的话借助栈完成。然后返回值通过R0传递。(ATPCS规范)
 
-  (3)����е���C����
-		���裺ֱ���ڻ���ļ�����IMPORT func,ʹ�õ�ʱ��BL func�����ˡ�
-			  �в������ݵ������MOV R0,#1...�Դ�����
+  (3)汇编中调用C语言
+		步骤：直接在汇编文件上面IMPORT func,使用的时候BL func就行了。
+			  有参数传递的情况：MOV R0,#1...以此类推
