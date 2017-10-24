@@ -1,0 +1,20 @@
+在《LDD3》中对ioctl的评价：“ioctl调用的非结构化本质导致众多内核开发者倾向于放弃它。”
+	1、消失的确切时间：
+		ioctl消失的版本是v2.6.35到v2.6.36-rc1间
+	2、消失的原因： 
+		ioctl的消失，并不是要把ioctl清理出去，而是要逐步的清理大内核锁（BKL）。
+	2.1、大内核锁（BKL）：
+	
+	3、调用ioctl与unlocked_ioctl在内核代码上的不同
+		  其实ioctl与unlocked_ioctl所对应的系统调用都是ioctl。但是在应用层调用ioctl的时候，对于我们实现ioctl或者unlocked_ioctl有什么不同呢？
+		  下面是系统调用代码的执行过程：
+		SYSCALL_DEFINE3(ioctl, unsigned int, fd, unsigned int, cmd, unsigned long, arg)--->do_vfs_ioctl---> vfs_ioctl	
+		而ioctl与unlocked_ioctl的区别就体现在了这个vfs_ioctl中
+	4、两者的区别：
+	    对比两者的代码，区别如下：
+		1.ioctl是受到大内核锁保护的，而unlocked_ioctl是直接执行的。
+		2.unlocked_ioctl优先级高于ioctl，如果存在unlocked_ioctl，则执行unlocked_ioctl，否则才执行ioctl。这个优先级的产生明显是为了过渡。
+	5、注意事项：
+		1在注册文件操作方法的结构体struct file_operations的时候原先的.ioctl=OOXX;替换为 .unlocked_ioctl=OOXX;
+		2.unlocked_ioctl少了一个inode参数。但是如果方法中真的需要其中的数据，可以通过filp->f_dentry->d_inode获得。
+		3.由于失去了大内核锁的保护，所以必须在unlocked_ioctl方法中自行实现锁机制，以保证不会在操作设备的时候（特别在SMP系统中）产生竞态。（也就实现了用小锁替换大锁）
