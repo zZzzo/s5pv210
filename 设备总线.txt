@@ -1,0 +1,152 @@
+linux内核中的总线设备驱动
+	i2c spi usb uart i2s ...还有platform虚拟总线
+					(保证了所有设备驱动都可以按照总线设备驱动模型来写驱动程序)
+	1、三大要素:
+		linux/linux/decice.h
+		1)总线(通常内核写好了,拿来用就行，主要是实现设备和设备驱动)
+			硬件上的总线体现在软件上的这个struct()
+			struct bus_type
+			{
+				const char *name;	//总线名
+				int *match;	//函数指针变量 匹配规则,匹配设备和设备驱动
+			}
+			注册:bus_register(...)		ls /sys/bus/
+			注销:bus_unregister(...)
+		
+		2)设备
+			struct device
+			{
+				struct bus_type *bus;	//该设备挂在哪条总线上
+			}
+			硬件上你的设备挂到某条总线上,那么软件上你的device.bus = &i2c_bus_type
+			device_register(...)
+			device_unregister(...)
+		3)设备驱动
+			struct device_driver
+			{
+				const char *name;
+				struct bus_type *bus;
+			
+				probe;
+				remove;
+			}
+			driver_register(...);
+			driver_unregiste(...);
+	
+	2、platform(平台)虚拟总线
+		platform_device 调用platform_device_register向总线注册设备(添加了一个节点)
+		platform_driver 调用platform_driver_register向总线注册设备驱动程序(添加了一个节点)
+		platform总线调用match函数对两个链表的节点进行匹配,匹配成功调用probe(探测)函数
+
+	
+		
+		
+		
+		
+	
+	通过实验反思内容
+		1.平台设备架构有什么作用?
+			2.6版本出现的平台设备总线架构
+			(之前没挂到总线的都按platform重写)
+			便于驱动程序的移植和管理(芯片改了,只要更改引脚就可以)
+			易变的内容放在device,driver如果需要使用这些易变的内容,
+			统统从device获取。
+			什么设备可以用平台设备架构来写?
+			跟最小系统无关的硬件设备都可以按照平台设备架构来完成驱动程序。
+
+			怎么找到内核中自带的按键驱动程序
+				在make munuconfig里找到按键点help
+				路径:drivers/input/keyboard/
+				变量:CONFIG_KEYBOARD_GPIO
+				在这个路线下的Makefile搜这个变量找到它的文件名gpio_keys.c
+				在gpio_keys.c下发现它是driver程序,那么通过.name 搜索它的device程序
+				发现一个函数platform_add_devices里面是一个for循环注册platform设备,
+				所以一般在平台设备总线中不会再添加一个device.c文件了，就直接在这里
+				添加一个我的设备到这个数组中就行了。
+				
+				
+		2.input子系统架构有什么作用?
+			
+		3.二者之间有什么关系?
+		4.input子系统在解决什么问题?
+		5.平台设备架构在解决什么问题?
+		
+	阶段小总结	
+		1.device 负责收集设备的各种信息(资源,GPIO口相关)
+		他要包装在一个结构体里，传递给匹配成功后调用的probe函数。
+		所以它的结构体platform_device里分为两部分
+		1)这个设备的自己独有的信息
+			名字(匹配用) 它的资源(resource)比较抽象的这些东西
+		2)各种设备都有的(platform抽取出来的父类)
+			.dev下的:gpio口 比较具体的这些东西。
+					 release 在这个总线上释放这个设备调用的函数.
+		2.driver它负责实现你匹配成功后要被调用的probe函数,
+		所以它的结构体中是要写个名字,然后调用probe的函数入口和
+		释放时的函数入口.
+		3.input子系统实现很简单,只需要分配，设置，注册，中断里报告事件，释放。
+		设置时，设置两个东西
+		evbit	监控的事件类型(在按键下就是按键和同步)
+		keybit	键值(就把probe的参数data(设备的信息的结构体)的键值传进去)
+		报告时，就是传你要报告的那个input、事件类型、键值、要设置成什么.
+		
+		4.几个小细节:timer定义的时候不要定成指针.probe remove有返回int
+	阶段总结2:
+		系统启动后会调用platform_bus_int初始化这个虚拟设备总线,然后向虚拟总线
+		注册即将挂载在这条总线上的设备。
+		有3个重要的结构体
+		
+		struct resource {
+		 	resource_size_t start; /*资源的起始物理地址*/
+		 	resource_size_t end; /*资源的结束物理地址*/
+		 	const char *name; /*资源的名称*/
+			unsigned long flags; /*资源的类型*/
+		 	struct resource *parent, *sibling, *child; /*资源的链表指针*/
+		 };
+		
+		 struct platform_device {
+			 const char * name; /*设备名*/
+			 int id; /*设备编号，配合设备名使用*/
+			 struct device dev;
+			 u32 num_resources;
+			 struct resource * resource; /*设备资源*/
+			
+		 struct platform_device_id *id_entry;
+		};
+		
+		struct platform_driver {
+			 int (*probe)(struct platform_device *);
+			 int (*remove)(struct platform_device *);
+			 void (*shutdown)(struct platform_device *);
+			 int (*suspend)(struct platform_device *, pm_message_t state);
+			 int (*suspend_late)(struct platform_device *, pm_message_t state);
+			 int (*resume_early)(struct platform_device *);
+			 int (*resume)(struct platform_device *);
+			 struct device_driver driver;
+			 struct platform_device_id *id_table;
+		};
+		它的匹配规则是return (strcmp(pdev->name, drv->name) == 0);
+		也就是说名字很重要,你要把dev和drv的名字设置一样的才可以。
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		

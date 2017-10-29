@@ -1,0 +1,59 @@
+========================================		
+	1.CPU和外接设备的链接方式
+========================================		
+	(1)GPIO连接的方式(按键、LED)
+		通过设置GPIO管脚的状态来完成通信(控制)
+			gpxcon
+			gpxpud
+			gpxdat
+	(2)类似内存的接口(DDRAM NorFlash Nand DM9000)
+		从硬件上看 CPU和芯片连接需要 数据线 地址线 BANK
+	
+	(3)协议类接口
+		uart
+		I2C
+			以AT24C02	eeprom
+		SPI
+		USB
+		PCI
+		I2S
+========================================		
+	2.I2C总线
+========================================
+	1.基本认识
+		(1)半双工通信(SCL,SDA)每个设备都有唯一的设备地址
+		(2)一次传输8bit,高位在前,低位在后;空闲状态:数据线拉为高电平
+	2.总线架构分析
+		(1)i2c设备驱动层组件(i2c-dev.c)
+			功能:
+			a.给用户提供调用接口
+			b.实现策略问题:它知道发什么数据,但不知道怎么发数据
+		(2)i2c核心层组件(i2c-core.c)
+			功能:
+			a.注册一根i2c总线
+			b.给驱动编程人员提供编程接口
+		(3)i2c总线驱动层组件(i2c-s3c2410.c)
+			功能:
+			a.初始化硬件(初始化i2c控制器)
+			b.实现机制:它知道怎么发数据,但不知道发什么数据
+
+这里主要就是看它的结构体.
+			
+	//发送函数
+extern int i2c_master_send(const struct i2c_client *client, const char *buf,int count);
+	//接收函数		   
+extern int i2c_master_recv(const struct i2c_client *client, char *buf,int count);
+	//传输一个i2c数据包
+extern int i2c_transfer(struct i2c_adapter *adap, struct i2c_msg *msgs,int num);
+
+
+
+
+
+
+
+
+
+
+
+	

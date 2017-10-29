@@ -388,17 +388,245 @@
 	printk
 	oops
 	kgdb
+-------------------------------------------------------------------
+	9.内核并发与竞态
+-------------------------------------------------------------------		
+	多个执行单元同时发生
+	并发的多个执行单元对共享资源的访问导致的竞争状态。
+	什么时候会产生竞态
+		1)SMP
+		2)单CPU支持人物抢占
+		3)中断和进程之间
+		4)中断和中断之间
+	解决方法:
+		1)中断屏蔽
+		2)原子操作
+			位原子操作
+			整型原子操作
+		3)自旋锁
+			优点:一旦可以获取锁，立即获得
+			缺点:长时间获取锁不成功,会消耗CPU资源。
+			它所保护的临界资源(代码段)通常比较短。
+		4)信号量
+			自旋锁只允许一个持有者,信号刘昂可以多个持有者
+			信号量保护的临界资源(代码段)比较长。
+	
+	linux内核提供4种互斥机制：
+		中断屏蔽，原子操作，自旋锁，信号量
+	1.中断屏蔽：
+		local_irq_disable();	//屏蔽中断
+		...
+		local_irq_enable();		//开中断
+	2.原子操作
+	3.自旋锁	
+		自旋，原地打转，最多只有一个持有者。
+		自旋锁不会使进程睡眠，如果一个执行单元
+		试图获取一个已经被持有的锁，那么该执行
+		单元就会一直忙等待，在这里看自旋锁是否被
+		持有者释放。
+		include/linux/spinlock_types.h
+		操作方法:
+			定义：
+			spinlock_t lock;
+			初始化:
+			spin_lock_init(...)
+			获取锁
+			spin_lock(...)		//如果不成功,则一直自旋等待。
+			spin_trylock(...)	//如果不成功,直接返回错误值
+			
+			操作临界资源
+			
+			释放锁
+			spin_unlock(...)
+			
+		注意:
+			1.spin_lock()和spin_unlock()要成对出现,如果两次释放锁,可能导致内核崩溃
+			2.自旋锁保护的临界资源尽量的端，尽量减少发生竞态的情况。
+		衍生出:
+		读写锁，
+		顺序锁
+		RCU(读-拷贝-更新)
+	4.信号量
+		struct semaphore {
+			spinlock_t		lock;
+			unsigned int		count;
+			struct list_head	wait_list;
+		};
+		操作方法:
+		定义信号量
+			struct semaphore sem;
+		初始化信号量
+			sema_init(*sem,int val);
+			init_MUTEX(*sem);		信号量初始化为1
+			init_MUTEX_LOCKED(*sem)		初始化为0
+			
+			DECLARE_MUTEX(name)	定义并初始化为1
+		获取信号量(	将sem-1)
+			down(...)	//	获取不成功将导致进程睡眠
+			down_interruptable(...)		//获取信号量不成功导致进程进入可中断的睡眠
+			down_killable(...)		//不成功 导致可killable的睡眠
+			down_trylock(...)		//不成功，直接返回错误号
+	
+		访问临界资源
+		
+		释放信号量(将sem+1)
+			up(...)
+-------------------------------------------------------------------
+	10.等待队列	(处理阻塞)
+-------------------------------------------------------------------	
+	操作方式:
+		创建一个等待队列头：
+			wait_queue_head_t wq;  //等待队列头
+		初始化
+			init_waitqueue_head(wait_queue_head_t *q);
+		操作
+			wait_event(wait_queue_head_t wq, condition)
+				wq: 等待队列
+				condition://条件 逻辑表达式 ,为1时代码往下执行,为 0 就挂起  
+			wake_up(wait_queue_head_t *q)
+	
+	另外一种：(可被中断打断)
+	wait_event_interruptible(...)	//阻塞
+	wake_up_interruptible(...)		//唤醒
+-------------------------------------------------------------------
+	11.多路监听侦测
+-------------------------------------------------------------------
+	select(...)---->poll(...)
+	
 		
 		
+-------------------------------------------------------------------
+	12.中断
+-------------------------------------------------------------------		
+	linux内核关于中断的操作
+	
+	1.注册中断服务程序。
+		request_irq(unsigned int irq, irq_handler_t handler,
+			unsigned long flags, const char * name, void * dev);
+		参数:
+			irq:要注册的中断号
+				data sheet中查找
+				arm/mach-s5pv210/include/mach/irqs.h
+				gpio_to_irq()函数
+			handler:中断处理函数
+			flags: 标志(2类:中断标志和中断类型)
+			name: 中断名,可以cat /proc/interrupt看到
+			dev: 给中断处理函数传递的参数(可以用来区分具体是哪个设备)
+		返回值:
+			成功: 返回为0, 出错返回 <0	
+		关键：找到对应的外部中断号。
 		
+	2.实现中断处理函数
+		2.1linux内核中中断处理程序的一般结构
+			顶半部：完成尽可能少的紧急功能，往往是简单的读取寄存器，清除中断标志。
+					然后登记底半部。
+			底半部：完成中断处理程序中绝大部分工作，通常这都比较耗时。
+			先执行完顶半部,然后在内核认为合适的时机会执行底半部。
+		    这种机制为的是让中断尽快结束，然后才能去响应同等优先级的中断。
+		2.2内核提供3种登记底半部的方法	
+			1)软中断
+			2)tasklet(利用了软中断的机制)
+				struct tasklet_struct
+				{
+					void (*func)(unsigned long);	//底半部执行函数
+					unsigned long data;				//传递的参数
+					...
+				}
+				
+				DECLARE_TASKLET(name, func, data);	//定义并初始化一个tasklet
+				
+				tasklet_schedule(&name);			//登记底半部
+				
+				void (*func)(unsigned long);		//实现底半部函数	
+			3)工作者队列
+				struct work_struct {
+					work_func_t func;		//底半部执行函数
+					...
+				};
+				
+				INIT_WORK()					//初始化work
+				
+				schedule_work(...)			//登记底半部	
+			4)tasklet和工作队列有什么区别？
+				tasklet中的func函数工作与中断上下文,func不允许睡眠。
+				work中的func工作于进程上下文，
+		2.3顶半部函数==>irqreturn_t xxx_interrupt(int irq, void *dev_id)
+		参数：
+			dev_id:中断时传递进来的参数
+		返回值:
+			enum irqreturn {
+				IRQ_NONE		= (0 << 0),  //中断没有处理
+				IRQ_HANDLED		= (1 << 0),   //处理处理了
+				IRQ_WAKE_THREAD		= (1 << 1), //中断处理函数执行完后,唤醒中断线程函数
+			};
+		关键:中断处理函数中,要给一个明确的指示你是否已经处理中断	
 		
+		2.4底半部==>void (*func)(unsigned long);
+	问题1：
+		如何判断哪个按键触发的中断？
+		如何去除抖动？
+-------------------------------------------------------------------
+	13.I/O与内存
+-------------------------------------------------------------------	
+	1.首先,两个概念:
+		统一编址(ARM)	
+		独立编址(x86)	
+		linux编程使用到的都是虚拟地址,驱动开发时,从芯片手册中得到的物理地址,需要转换成
+		物理地址再使用。
 		
+		内核中得到的物理地址的使用过程:
+		1)申请I/O内存	
+			request_mem_region(start, n, name);
+			start:待申请的起始地址(物理地址)
+			n:从start开始地址的字节数
+		2)映射
+			ioremap(phys, addr, size);
+			phys_addr:等同于1)中的start
+			size:等同于1)n
+			return:映射后的虚拟地址vir_addr
+		3)I/O内存操作函数
+			ioread8 ioread16 ioread32
+			iowrite8 iowrite16 iowrite32
+			*((volatile unsigned int *)vir_addr) = 0xxxxx;
+		4)取消映射
+			ioumap(*addr)
+			addr:ioremap返回的虚拟地址vir_addr
+		5)释放I/O内存
+			release_mem_region(start,n)
 		
-		
-		
-		
-		
-		
+	2.什么样的变量要定义成volatile
+		1)硬件地址
+		2)多线程中贡献的全局变量
+		3)中断服务程序和进程(线程)共享的全局变量
+	---------------------------------------------------
+	
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+	
+	
 		
 		
 		
