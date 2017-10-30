@@ -1,0 +1,42 @@
+===============================================================
+	                    input子系统
+===============================================================
+		对于只要输入没有输出的设备，该类设备驱动程序有很多可以写成
+	公用的代码(缓冲区、连续按键)，input子系统解决的问题，就是把这
+  些可以抽象出来的公共代码，在内核中实现好了，直接使用就可以。
+
+	一、input子系统的核心模块
+		drivers/input/input.c
+	要想使用内核提供的这些公共代码,你写的驱动程序要遵循一定的框架
+	
+  二、大概流程：
+	声明一个input_dev结构体变量
+	struct input_dev;
+	
+	1)分配一个输入设备
+		input_allocate_device(...)
+	2)设置该输入设备(input_dev)
+	3)注册输入设备
+		input_register_device(...)
+	4)报告事件
+		input_event(...)
+	5)注销输入设备
+		input_unregister_device(...)
+	6)释放输入设备
+		input_free_device(...)
+
+  三、input子系统的框架：
+	input 核心模块(对应这input.c文件)需要两部分内容来实现这个系统,
+	第一部分就是操作input_device结构,1)alloc 2)配置 3)register 4)input_event报告事件 5)unregister 6)free
+	input_device会报告很多事件给input子系统,事件的处理就在另一部分即理解为事件处理器(event_handler)
+	那么这三部分是怎么关联起来的？
+	第一,input_device是通过input_register_device跟input core关联。
+		在这个注册的过程，分为两步:
+			1)向input_core维护的input_dev_list中添加一个结点(又是面向对象的思想)
+			2)用添加的这个结点与input_handler_list的结点进行匹配。
+	第二，event handler通过input_register_handler跟input core 关联
+		同样的,input还维护着一个input_handler_list，event的注册就是向其中添加一个结点
+		接着就是结点匹配的问题。
+	结点匹配：调用input_match_device函数,匹配成功的话,会调用connect函数。
+
+
