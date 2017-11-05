@@ -6,9 +6,9 @@
 			gpxcon
 			gpxpud
 			gpxdat
-	(2)类似内存的接口(DDRAM NorFlash Nand DM9000)
+	(2)类似内存的接口
 		从硬件上看 CPU和芯片连接需要 数据线 地址线 BANK
-	
+		DDRAM NorFlash Nand DM9000
 	(3)协议类接口
 		uart
 		I2C
@@ -18,42 +18,372 @@
 		PCI
 		I2S
 ========================================		
-	2.I2C总线
+	2.I2C总线基本
 ========================================
 	1.基本认识
 		(1)半双工通信(SCL,SDA)每个设备都有唯一的设备地址
 		(2)一次传输8bit,高位在前,低位在后;空闲状态:数据线拉为高电平
-	2.总线架构分析
-		(1)i2c设备驱动层组件(i2c-dev.c)
-			功能:
-			a.给用户提供调用接口
-			b.实现策略问题:它知道发什么数据,但不知道怎么发数据
-		(2)i2c核心层组件(i2c-core.c)
-			功能:
-			a.注册一根i2c总线
-			b.给驱动编程人员提供编程接口
-		(3)i2c总线驱动层组件(i2c-s3c2410.c)
-			功能:
-			a.初始化硬件(初始化i2c控制器)
-			b.实现机制:它知道怎么发数据,但不知道发什么数据
+	2.架构层次分析
+		a)总线驱动(bus):
+			1.提供i2c adapter的硬件驱动，探测、初始化i2c adapter（如申请i2c的io地址
+			 和中断号），驱动soc控制的i2c adapter在硬件上产生信号（start、stop、ack）
+			 以及处理i2c中断。
+			2.提供i2c adapter的algorithm，用具体适配器的xxx_xferf()函数来填充i2c_algorithm
+			 的master_xfer函数指针，并把赋值后的i2c_algorithm再赋值给i2c_adapter的algo指针。
 
-这里主要就是看它的结构体.
+		b)设备驱动层(device driver):
+			1.实现i2c设备驱动中的i2c_driver接口，用具体的i2c device设备的attach_adapter()、
+			 detach_adapter()方法赋值给i2c_driver的成员函数指针。实现设备device与总线（或者
+			 叫adapter）的挂接。
+			2.实现i2c设备所对应的具体device的驱动,i2c_driver只是实现设备与总线的
+			 挂接,而挂接在总线上的设备是千差万别的,所以要实现具体设备的write()read()
+			 ioctl()等方法,然后注册字符设备(大多就是字符设备)
 			
-	//发送函数
-extern int i2c_master_send(const struct i2c_client *client, const char *buf,int count);
-	//接收函数		   
-extern int i2c_master_recv(const struct i2c_client *client, char *buf,int count);
+		
+============================================
+	3.跟踪内核代码
+============================================
+1.i2c设备驱动层-->i2c-dev.c
+	//1、注册主设备号并绑定硬件操作方法
+	res =  (I2C_MAJOR, "i2c", &i2cdev_fops);
+			#define I2C_MAJOR	89
+	//2、创建设备类
+	i2c_dev_class = class_create(THIS_MODULE, "i2c-dev");
+	//3、绑定适配器,搜索i2c总线设备链表,每搜索到一个就会调用i2cdev_attach_adapter
+	//创建设备文件就在i2cdev_attach_adapter里面
+	i2c_for_each_dev(NULL, i2cdev_attach_adapter);
+		//4、连接适配器
+		i2cdev_attach_adapter是函数指针入口
+		它的原型:i2cdev_attach_adapter(struct device *dev, void *dummy)
+			//创建一个设备文件
+			i2c_dev->dev = device_create(i2c_dev_class, &adap->dev,
+				     MKDEV(I2C_MAJOR, adap->nr), NULL,
+				     "i2c-%d", adap->nr);//创建的设备文件名:/dev/i2c-1 ...
+	-----------------------
+	到这里创建好了设备号/设备类/设备
+	-----------------------
+	在头文件找到它的一些操作函数,在include/linux下的i2c.h
+	//发送i2c数据
+	extern int i2c_master_send(const struct i2c_client *client, const char *buf,int count);
+	//接收i2c数据	这两个最后都会调用i2c_transfer(...)
+	extern int i2c_master_recv(const struct i2c_client *client, char *buf,int count);
 	//传输一个i2c数据包
-extern int i2c_transfer(struct i2c_adapter *adap, struct i2c_msg *msgs,int num);
+	extern int i2c_transfer(struct i2c_adapter *adap, struct i2c_msg *msgs,int num);
+	//注册板卡信息
+	i2c_register_board_info(int busnum, struct i2c_board_info const *info,unsigned n);
 
+	//注册/注销适配器
+	int i2c_add_adapter(struct i2c_adapter *);
+	int i2c_del_adapter(struct i2c_adapter *);
+	int i2c_add_numbered_adapter(struct i2c_adapter *);
 
+	//注册/注销i2c驱动
+	extern int i2c_register_driver(struct module *, struct i2c_driver *);
+	extern void i2c_del_driver(struct i2c_driver *);
+	//注册/注销i2c设备
+	i2c_new_device(struct i2c_adapter *adap, struct i2c_board_info const *info);
+	i2c_unregister_device(struct i2c_client *);
 
+================================================================
+	4、分析file_operations:
+================================================================	
+1.open()
 
+app:	fd = open("/dev/i2c-0", O_RDWR);
+-------------------------------------------
+vfs:	sys_open-->调度到i2c设备层
+----------
+i2c-dev.c
+	i2c_dev_init(上面第3步)
+		调用i2cdev_open函数.
+		{
+			unsigned int minor = iminor(inode);//返回次设备号
+			struct i2c_client *client;		//i2c从设备
+			struct i2c_adapter *adap;		//i2c适配器(控制器)
+			struct i2c_dev *i2c_dev;		//设备		
+					struct i2c_dev {
+						struct list_head list;
+						struct i2c_adapter *adap;	//关键要找到这个适配器
+						struct device *dev;
+					};
+			i2c_dev = i2c_dev_get_by_minor(minor);
+			//获取适配器
+			adap = i2c_get_adapter(i2c_dev->adap->nr);	
+			//设备分配空间
+			client = kzalloc(sizeof(*client), GFP_KERNEL);
+			//写上名字
+			snprintf(client->name, I2C_NAME_SIZE, "i2c-dev %d", adap->nr);
+			//挂上适配器
+			client->adapter = adap;		//指定我这个设备是属于哪个适配器.
+			file->private_data = client;
+		}	
+		[整个流程就是从调用open(有个inode节点,通过inode节点得到这个i2c从设备
+		的次设备号)然后通过次设备号得到对应的device(它有个内核链表,通过遍历链表找到)
+		然后得到的device中的适配器就是这个设备对应的适配器，再给i2c_client分配空间
+		给它写上名字,附上适配器然后保存到file->private_data。
+		(这里的问题:为什么不将i2c_dev和i2c_client整合到一起,通过次设备号找device的时候
+		就可以直接赋给i2c_client了.内核这里最后还是要将适配器赋给i2c_client)
+		]
+----------------------------------------------------------------------------------
+2.ioctl()
+app:	ioctl(fd, cmd, device_addr);
+-------------------------------------------
+vfs:	sys_ioctl-->调度到i2c设备驱动层
+----------
+i2c-dev.c
+		//获取i2c_clent的信息(在open(保存的))
+		//这个结构体保存了设备名字"dev_i2c 0" 和适配器
+		struct i2c_client *client = file->private_data;
+		
+		switch (cmd) {
+			case I2C_SLAVE:
+			case I2C_SLAVE_FORCE:
+				...
+				client->addr = arg;		//指定client的设备地址.
+				return 0;
+----------------------------------------------------------------------------------
+2.write()
+app:	write(fd, wbuf, 2);
+-------------------------------------------
+vfs:	sys_write-->调度到i2c设备驱动层
+----------
+i2c-dev.c
 
+		//获取client,这时候保存了名字,适配器,设备地址.
+		struct i2c_client *client = file->private_data;
 
+		if (count > 8192)		//这里8192在哪见过
+			count = 8192;
+		//获取用户空间数据
+		tmp = memdup_user(buf, count);
+			copy_from_user(p, src, len)
+			
+		//发送i2c数据,这里再进去就跳转到i2c-core.c
+		ret = i2c_master_send(client, tmp, count);
+		//意味着从设备驱动层往下到了i2c核心层
+	-----------------------------------------------	
+i2c-core.c	
+		//获取适配器
+		struct i2c_adapter *adap = client->adapter;
+		struct i2c_msg msg;
 
+		//构建i2c数据包
+		msg.addr = client->addr;	//0x50
+		msg.flags = client->flags & I2C_M_TEN;	//0-->写
+		msg.len = count;		
+		msg.buf = (char *)buf;
+		//传输i2c数据包
+		ret = i2c_transfer(adap, &msg, 1);
+			if (adap->algo->master_xfer) {
+				...
+				/*调用i2c总线驱动的操作方法*/
+				adap->algo->master_xfer(adap, msgs, num);
+				//到这里为止,最底层的总线驱动层会调用这个master_xfer()
+			}
+i2c_s3c2410.c,要分析总线驱动层,要先去分析资源层(dev_i2c0(1/2/3...).c)
 
+================================================================
+	4、资源层分析:
+================================================================
+i2c控制器0平台资源构建(arch/arm/plat-samsung/dev-i2c0.c)
+	//构建平台资源
+	static struct resource s3c_i2c_resource[] = {
+		[0] = {
+			.start = S3C_PA_IIC,
+			.end   = S3C_PA_IIC + SZ_4K - 1,
+			.flags = IORESOURCE_MEM,
+		},
+		[1] = {
+			.start = IRQ_IIC,
+			.end   = IRQ_IIC,
+			.flags = IORESOURCE_IRQ,
+		},
+	};
+	
+	//构建i2c结构体
+	struct platform_device s3c_device_i2c0 = {
+		.name		  = "s3c2410-i2c",
+	#ifdef CONFIG_S3C_DEV_I2C1
+		.id		  = 0,
+	#else
+		.id		  = -1,
+	#endif
+		.num_resources	  = ARRAY_SIZE(s3c_i2c_resource),
+		.resource	  = s3c_i2c_resource,
+	};
 
+	//构建i2c平台数据
+	static struct s3c2410_platform_i2c default_i2c_data0 __initdata = {
+		.flags		= 0,
+		.slave_addr	= 0x10,			//表示这个i2c控制器作为从机时的地址.
+		.frequency	= 100*1000,		//100kbps
+		.sda_delay	= 100,			//间隔时间
+	};
+	
+	//设置i2c平台数据
+	void __init s3c_i2c0_set_platdata(struct s3c2410_platform_i2c *pd)
+	{
+		...
+		npd->cfg_gpio = s3c_i2c0_cfg_gpio;	//配置i2c管脚功能
+			进去s3c_i2c0_cfg_gpio:
+			{	//配置管脚的功能并上拉.
+				s3c_gpio_cfgall_range(S5PV210_GPD1(0), 2,
+							S3C_GPIO_SFN(2), S3C_GPIO_PULL_UP);
+							
+				/*具体怎么配置:
+					将gpd1(0)开始的2位,也就是gpd10和gpd11配置成
+				S3C_GPIO_SFN( 0010 ),查看datasheet发现就是gpd0/1con
+				的	0010 = I2C0_SDA/SCL.
+				*/
+			}
+	}
+以上资源层的东西都找到了,那么总线驱动层怎么去调用它.
+它要先注册
+-------------------------------------------------------------------
+注册平台设备:arch/arm/mach-s5pv210/mach-smdkv210.c
+	
+	static struct platform_device *smdkv210_devices[] __initdata = {
+	
+		...
+		&s3c_device_i2c0,
+		&s3c_device_i2c1,
+		&s3c_device_i2c2,
+		...
+	｝
+	然后在init函数里:
+	void __init smdkv210_machine_init(void)
+	{
+			...
+		
+		//调用i2c平台数据
+		s3c_i2c0_set_platdata(NULL);
+			...
+		
+		//每个i2c控制器可以挂接127个设备,对要挂接的设备信息进行封装
+		i2c_register_board_info(0, smdkv210_i2c_devs0,ARRAY_SIZE(smdkv210_i2c_devs0));
+			这里的smdkv210_i2c_devs0：
+				static struct i2c_board_info smdkv210_i2c_devs0[] __initdata = {
+					{ I2C_BOARD_INFO("24c08", 0x50), },     /* Samsung S524AD0XD1 */
+					{ I2C_BOARD_INFO("wm8580", 0x1b), },
+				};
+			...			
+			platform
+		/*注册平台设备*/
+		platform_add_devices(smdkv210_devices, ARRAY_SIZE(smdkv210_devices));
+			这里面是个for循环,依次向总线注册设备,那么注册驱动在哪?(总线驱动层i2c-s3c2410.c)
+	}
+========================================================
+	5.驱动层
+========================================================
+	drivers/i2c/busses/i2c-s3c2410.c
 
-
+	首先,在init里: 
+	platform_driver_register(&s3c24xx_i2c_driver);
+			static struct platform_driver s3c24xx_i2c_driver = {
+				.probe		= s3c24xx_i2c_probe,
+				.remove		= s3c24xx_i2c_remove,
+				.id_table	= s3c24xx_driver_ids,
+				.driver		= {
+					.owner	= THIS_MODULE,
+					.name	= "s3c-i2c",
+					.pm	= S3C24XX_DEV_PM_OPS,
+				},
+			};
+			实现了它的probe:
+				//！！设置adapter
+				i2c->adap.algo    = &s3c24xx_i2c_algorithm;
+				//获取时钟
+				i2c->dev = &pdev->dev;
+				i2c->clk = clk_get(&pdev->dev, "i2c");
+				//使能时钟
+				clk_enable(i2c->clk);
+				//获取 平台资源	IO内存地址资源
+				res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+				//！！初始化i2c控制器
+				ret = s3c24xx_i2c_init(i2c);
+				------------------------------
+					i2c总线(也就是控制器)他也是一个设备,那么也要实现它的驱动程序
+					驱动程序的功能就是完成i2c协议的数据收发i2c_transfer(...)
+					这里是写在设备和驱动匹配完成后调用
+					(device在mach-smdkv210.c注册,driver在i2c-s3c2410.c注册)
+				
+				
+				------------------------------
+				//获取IRQ资源
+				i2c->irq = ret = platform_get_irq(pdev, 0);
+				//注册中断
+				ret = request_irq(i2c->irq, s3c24xx_i2c_irq, IRQF_DISABLED,
+						  dev_name(&pdev->dev), i2c);
+				//注册I2C适配器.
+				ret = i2c_add_numbered_adapter(&i2c->adap);
+				//设置平台驱动数据
+				platform_set_drvdata(pdev, i2c);
+			------------------------
+			分析probe函数:
+			首先涉及4个结构体,probe函数前面就是在初始化这几个结构体:
+					1.probe的参数	struct platform_device *pdev		
+						从device传过来的.那么去找注册设备时调用的register.(在mach-smdkv210.c)
+						它又是放在一个数组里,for循环注册设备的:
+						[在dev-i2c0.c文件找到这个结构体]也就是上面说的资源层
+						struct platform_device s3c_device_i2c0 = {
+							.name		  = "s3c2410-i2c",
+							.num_resources	  = ARRAY_SIZE(s3c_i2c_resource),
+							.resource	  = s3c_i2c_resource,
+						};
+						但是相比前面平台设备驱动框架的device少了一个dev下的platform_data.
+						所以,继续往下看,它在s3c_i2c0_set_platdata(...)函数中设置了
+						s3c_device_i2c0.dev.platform_data
+						
+						而这个函数又是在mach-smdkv210.c中的init调用.也就是内核启动后,
+						就会调用到这个函数,(设置平台数据).这样device结构体需要的成员就
+						设置好了.也注册上去了(这里为什么要这样设置?可移植性?通过分离设备
+						相关的结构体和管脚信息,便于修改?)
+						
+					2.struct s3c24xx_i2c *i2c;
+						这里设置了一大堆数据,是为了初始化i2c控制器
+						在probe下面有一句ret = s3c24xx_i2c_init(i2c);
+						这里初始化了i2c控制器.(添加一个从设备client是在mach-smdkv210.c中添加)
+						
+					3.struct s3c2410_platform_i2c *pdata;
+						pdata是dev.platform_data的结构体
+					4.struct resource *res;
+						从pdev获取中断资源时作为临时变量.
+			-----------------------
+	~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	另一方
+		1、总线
+			i2c总线(i2c控制器)他也是一个实际存在的设备(其实adapter就是i2c控制器的软件抽象)
+			实现它的驱动就是要实现数据收发
+			
+			i2c控制器的驱动程序在i2c-s3c2410.c
+		2、设备
+			看内核代码是怎么实例化i2c设备
+			
+			在mach-smdkv210.c中(内核一开始调用的.c).
+			自己先对要挂接的设备板卡信息(名字跟地址)进行封装，
+			然后调用i2c_register_board_info(他会将板卡信息添加
+			到一个静态链表中__i2c_board_list)
+			这个链表在i2c-core.c中的i2c_scan_static_board_info(...)函数使用,
+			而这个函数又在i2c_register_adapter(...)中被使用,继续被
+			i2c_add_numbered_adapter使用,最后在s3c24xx_i2c_probe(...)被使用(就是注册i2c适配器)
+			
+			所以,内核中实现i2c控制器驱动,向内核中注册了adapter.
+			注册adapter时，同时完成扫描静态链表,看是否有设备挂在adapter上
+			存在的话,会根据该设备的信息("atxxx02,0x05")完成i2c_client实例化并注册
+			那么,它为什么在probe才注册????
+			
+		3、驱动
+			只需要添加自己的设备信息,然后调用i2c_register_board_info,添加到链表.
+			然后实现我的驱动程序read()wrte()那些....
+				read/write也是只需要组织好msg数组，然后调用i2c_transfer()就可以了 
+			
+			
+			
+			
+			
+			
+			
+	
+	
+	
 	
